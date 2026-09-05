@@ -2,9 +2,14 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const prisma = require('../prisma/client');
 const { resolveUserPermissions, safeParseJson } = require('./roleController');
+const { sendOtpEmail } = require('../lib/mailer');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 const SALT_ROUNDS = 10;
+
+function generateOtp() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 
 // Helper to strip password before sending user back
 async function sanitizeUser(user, explicitPerms = null) {
@@ -68,7 +73,7 @@ async function signup(req, res) {
   }
 }
 
-// LOGIN
+// LOGIN (Validates credentials, generates 6-digit OTP, and emails it)
 async function login(req, res) {
   const { password } = req.body;
   const normalizedEmail = normalizeEmail(req.body.email);
@@ -88,11 +93,79 @@ async function login(req, res) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    const permissions = await resolveUserPermissions(user);
-    const sanitized = await sanitizeUser(user, permissions);
+    // Generate secure 6-digit OTP valid for 10 minutes
+    const otp = generateOtp();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        otpCode: otp,
+        otpExpiresAt,
+      },
+    });
+
+    // Send OTP email asynchronously via Nodemailer
+    await sendOtpEmail(user.email, otp, user.name);
+
+    return res.json({
+      requireOtp: true,
+      email: user.email,
+      message: 'A 6-digit verification code has been sent to your email.',
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: error.message || 'An error occurred while logging in' });
+  }
+}
+
+// VERIFY OTP (Validates OTP code and returns auth token)
+async function verifyOtp(req, res) {
+  const { otp } = req.body;
+  const normalizedEmail = normalizeEmail(req.body.email);
+
+  if (!normalizedEmail || !otp) {
+    return res.status(400).json({ error: 'Email and verification code are required' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!user.otpCode || !user.otpExpiresAt) {
+      return res.status(400).json({
+        error: 'No active verification code found. Please log in again to receive a new code.',
+      });
+    }
+
+    if (new Date() > new Date(user.otpExpiresAt)) {
+      return res.status(400).json({
+        error: 'Verification code has expired. Please request a new code.',
+      });
+    }
+
+    if (String(user.otpCode).trim() !== String(otp).trim()) {
+      return res.status(400).json({
+        error: 'Invalid verification code. Please check your email and try again.',
+      });
+    }
+
+    // Code is valid! Clear OTP fields
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        otpCode: null,
+        otpExpiresAt: null,
+      },
+    });
+
+    const permissions = await resolveUserPermissions(updatedUser);
+    const sanitized = await sanitizeUser(updatedUser, permissions);
 
     const token = jwt.sign(
-      { userId: user.id, role: sanitized.role, permissions },
+      { userId: updatedUser.id, role: sanitized.role, permissions },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -100,7 +173,44 @@ async function login(req, res) {
     return res.json({ user: sanitized, token });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: error.message || 'An error occurred while logging in' });
+    return res.status(500).json({ error: 'Failed to verify code' });
+  }
+}
+
+// RESEND OTP
+async function resendOtp(req, res) {
+  const normalizedEmail = normalizeEmail(req.body.email);
+
+  if (!normalizedEmail) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const otp = generateOtp();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        otpCode: otp,
+        otpExpiresAt,
+      },
+    });
+
+    await sendOtpEmail(user.email, otp, user.name);
+
+    return res.json({
+      success: true,
+      message: 'A new 6-digit verification code has been sent to your email.',
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Failed to resend verification code' });
   }
 }
 
@@ -325,6 +435,8 @@ async function updateUserPermissions(req, res) {
 module.exports = {
   signup,
   login,
+  verifyOtp,
+  resendOtp,
   getAllUsers,
   getUserById,
   updateUser,

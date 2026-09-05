@@ -6,8 +6,14 @@ const { authenticate, requireAdmin, requirePermission } = require('../middleware
 // POST /user/signup  — public
 router.post('/signup', userController.signup);
 
-// POST /user/login  — public
+// POST /user/login  — public (sends 6-digit OTP to email)
 router.post('/login', userController.login);
+
+// POST /user/verify-otp  — public (validates OTP & issues session token)
+router.post('/verify-otp', userController.verifyOtp);
+
+// POST /user/resend-otp  — public (resends new OTP to email)
+router.post('/resend-otp', userController.resendOtp);
 
 // POST /user/admin/create  — Admin / user:manage creates user
 router.post('/admin/create', authenticate, requirePermission('user:manage'), userController.adminCreateUser);

@@ -17,6 +17,8 @@ model User {
   role            UserRole  @default(USER)
   customRole      String?
   permissions     String?   @db.Text
+  otpCode         String?
+  otpExpiresAt    DateTime?
   ticketsAssigned Ticket[]  @relation("AssignedTickets")
   ticketsCreated  Ticket[]  @relation("CreatedTickets")
 }
