@@ -5,10 +5,11 @@
   "license": "ISC",
   "author": "",
   "type": "commonjs",
-  "main": "index.js",
+  "main": "app.js",
   "scripts": {
-    "start": "nodemon app.js",
-    "test": "npm run test"
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "build": "npx prisma generate"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",
