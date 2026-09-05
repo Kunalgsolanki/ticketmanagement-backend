@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+
+}
+
+model User {
+  id              Int       @id @default(autoincrement())
+  name            String
+  email           String    @unique
+  password        String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  role            UserRole  @default(USER)
+  customRole      String?
+  permissions     String?   @db.Text
+  ticketsAssigned Ticket[]  @relation("AssignedTickets")
+  ticketsCreated  Ticket[]  @relation("CreatedTickets")
+}
+
+model Role {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  permissions String   @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Ticket {
+  id           Int            @id @default(autoincrement())
+  title        String
+  description  String
+  status       TicketStatus   @default(OPEN)
+  priority     TicketPriority @default(MEDIUM)
+  createdById  Int
+  assignedToId Int?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  assignedTo   User?          @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  createdBy    User           @relation("CreatedTickets", fields: [createdById], references: [id])
+
+  @@index([createdById])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([priority])
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+enum UserRole {
+  USER
+  ADMIN
+}
