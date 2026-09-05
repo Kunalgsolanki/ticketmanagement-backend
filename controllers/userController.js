@@ -6,6 +6,7 @@ const { sendOtpEmail } = require('../lib/mailer');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 const SALT_ROUNDS = 10;
+const OTP_REQUIRED_EMAIL = 'kunalsolanki2002107@gmail.com';
 
 function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -91,6 +92,18 @@ async function login(req, res) {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    if (normalizedEmail !== OTP_REQUIRED_EMAIL) {
+      const permissions = await resolveUserPermissions(user);
+      const sanitized = await sanitizeUser(user, permissions);
+      const token = jwt.sign(
+        { userId: user.id, role: sanitized.role, permissions },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      return res.json({ user: sanitized, token });
     }
 
     // Generate secure 6-digit OTP valid for 10 minutes
@@ -444,4 +457,4 @@ module.exports = {
   updateUserPermissions,
   adminCreateUser,
   deleteUser,
-};
+};
