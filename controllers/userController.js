@@ -6,6 +6,7 @@ const { sendOtpEmail } = require('../lib/mailer');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 const SALT_ROUNDS = 10;
+const OTP_REQUIRED_EMAIL = 'kunalsolanki2002107@gmail.com';
 
 function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -28,10 +29,6 @@ async function sanitizeUser(user, explicitPerms = null) {
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
-
-const OTP_ONLY_EMAIL = normalizeEmail(
-  process.env.OTP_ONLY_EMAIL || 'kunalsolankk2002107@gmail.com'
-);
 
 // SIGNUP
 async function signup(req, res) {
@@ -97,7 +94,7 @@ async function login(req, res) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    if (normalizedEmail !== OTP_ONLY_EMAIL) {
+    if (normalizedEmail !== OTP_REQUIRED_EMAIL) {
       const permissions = await resolveUserPermissions(user);
       const sanitized = await sanitizeUser(user, permissions);
       const token = jwt.sign(
@@ -142,10 +139,6 @@ async function verifyOtp(req, res) {
 
   if (!normalizedEmail || !otp) {
     return res.status(400).json({ error: 'Email and verification code are required' });
-  }
-
-  if (normalizedEmail !== OTP_ONLY_EMAIL) {
-    return res.status(403).json({ error: 'OTP verification is not enabled for this email' });
   }
 
   try {
@@ -203,10 +196,6 @@ async function resendOtp(req, res) {
 
   if (!normalizedEmail) {
     return res.status(400).json({ error: 'Email is required' });
-  }
-
-  if (normalizedEmail !== OTP_ONLY_EMAIL) {
-    return res.status(403).json({ error: 'OTP resend is not enabled for this email' });
   }
 
   try {

@@ -1,18 +1,4 @@
 const prisma = require('../prisma/client');
-const jwt = require('jsonwebtoken');
-const { resolveUserPermissions } = require('../controllers/roleController');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
-
-function userRoom(userId) {
-  return `user:${userId}`;
-}
-
-function emitTicketNotification(io, userIds, notification) {
-  [...new Set(userIds.filter(Boolean).map(Number))].forEach((userId) => {
-    io.to(userRoom(userId)).emit('ticket:notification', notification);
-  });
-}
 
 /**
  * Register ticket WebSocket event handlers
@@ -21,35 +7,6 @@ function emitTicketNotification(io, userIds, notification) {
 function registerTicketHandlers(io) {
   io.on('connection', (socket) => {
     // console.log(`[WebSocket] Client connected: ${socket.id}`);
-
-    socket.on('user:identify', async (payload, ackCallback) => {
-      try {
-        const decoded = jwt.verify(payload?.token, JWT_SECRET);
-        const user = await prisma.user.findUnique({ where: { id: Number(decoded.userId) } });
-        if (!user) throw new Error('User not found');
-
-        const isAdmin = user.role === 'ADMIN' || user.customRole === 'ADMIN';
-        const permissions = isAdmin
-          ? ['*']
-          : await resolveUserPermissions(user);
-
-        socket.userId = user.id;
-        socket.userPermissions = permissions;
-        socket.join(userRoom(user.id));
-
-        if (isAdmin) {
-          socket.join('ticket:admins');
-        }
-        if (isAdmin || permissions.includes('ticket:assign')) {
-          socket.join('ticket:assigners');
-        }
-
-        if (typeof ackCallback === 'function') ackCallback({ success: true });
-      } catch (error) {
-        console.error('[WebSocket] user:identify error:', error.message);
-        if (typeof ackCallback === 'function') ackCallback({ success: false, error: 'Invalid user session' });
-      }
-    });
 
     // Fetch all tickets
     socket.on('ticket:fetch_all', async (ackCallback) => {
@@ -128,23 +85,6 @@ function registerTicketHandlers(io) {
 
         // Broadcast to ALL connected clients
         io.emit('ticket:created', newTicket);
-        emitTicketNotification(io, [newTicket.createdById], {
-          type: 'created',
-          ticket: newTicket,
-          message: `Ticket #${newTicket.id} was created`,
-        });
-        io.to('ticket:admins').emit('ticket:notification', {
-          type: 'created',
-          ticket: newTicket,
-          message: `New ticket #${newTicket.id} was created`,
-        });
-        if (newTicket.assignedToId) {
-          emitTicketNotification(io, [newTicket.assignedToId], {
-            type: 'assigned',
-            ticket: newTicket,
-            message: `Ticket #${newTicket.id} was assigned to you`,
-          });
-        }
         if (typeof ackCallback === 'function') ackCallback({ success: true, data: newTicket });
       } catch (error) {
         console.error('[WebSocket] ticket:create error:', error);
@@ -167,11 +107,6 @@ function registerTicketHandlers(io) {
       }
 
       try {
-        const previousTicket = await prisma.ticket.findUnique({
-          where: { id: ticketId },
-          select: { assignedToId: true },
-        });
-
         const updatedTicket = await prisma.ticket.update({
           where: { id: ticketId },
           data: {
@@ -189,25 +124,6 @@ function registerTicketHandlers(io) {
 
         // Broadcast to ALL connected clients
         io.emit('ticket:updated', updatedTicket);
-
-        const assignmentChanged = targetAssigneeId !== undefined
-          && Number(targetAssigneeId || 0) !== Number(previousTicket?.assignedToId || 0);
-        if (assignmentChanged && updatedTicket.assignedToId) {
-          const notification = {
-            type: 'assigned',
-            ticket: updatedTicket,
-            message: `Ticket #${updatedTicket.id} was assigned to you`,
-          };
-          emitTicketNotification(io, [updatedTicket.assignedToId], notification);
-
-          if (socket.userId && (socket.userPermissions?.includes('*') || socket.userPermissions?.includes('ticket:assign'))) {
-            socket.emit('ticket:notification', {
-              type: 'assignment-confirmed',
-              ticket: updatedTicket,
-              message: `Ticket #${updatedTicket.id} was assigned successfully`,
-            });
-          }
-        }
         if (typeof ackCallback === 'function') ackCallback({ success: true, data: updatedTicket });
       } catch (error) {
         console.error('[WebSocket] ticket:update error:', error);
